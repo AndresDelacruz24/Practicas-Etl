@@ -44,8 +44,8 @@ def cargar_datos(query, data):
         cursor = conn.cursor() 
         cursor.executemany(query, data) 
         conn.commit() 
-        cursor.close() 
         print("Datos cargados exitosamente") 
+        cursor.close() 
     except Exception as e: 
         print(f"Error al cargar datos: {e}") 
         
@@ -82,41 +82,84 @@ def cargar_dim_cliente():
         cargar_datos(query_insert, data_filtrada) 
     else: print("No hay clientes nuevos para insertar") 
     
-def cargar_vendedor(): 
-    query_consulta1 = "select distinct(nombre_vendedor),region_vendedor from prueba_sg.ventas v where nombre_vendedor is not null and region_vendedor is not null" 
-    query_consulta2 = "select distinct(nombre_vendedor) from prueba_sg.presupuesto p where nombre_vendedor is not null"  
-    query_existe_vendedor = "SELECT nombre_vendedor FROM dm_ventas_prueba.dim_vendedor WHERE nombre_vendedor = %s"  
-    query_existe_region = "SELECT region_id FROM dm_ventas_prueba.dim_region WHERE nombre_region = %s"  
-    query_insert = "INSERT INTO dm_ventas_prueba.dim_vendedor (vendedor_id, nombre_vendedor, region) VALUES (%s, %s, %s)"  
-    data = traer_datos(query_consulta1) + traer_datos(query_consulta2)  
-    cursor1 = conn.cursor()  
-    cursor2 = conn.cursor()  
-    data_filtrada = []  
-    resultado = None  
-    for vendedor_data in data:  
-        nombre_vendedor = vendedor_data[0]  
-        nombre_region = vendedor_data[1] if len(vendedor_data) > 1 else None  
-        print(f"Procesando vendedor: {nombre_vendedor}, región: {nombre_region}")  
-        cursor1.execute(query_existe_vendedor, (nombre_vendedor,))  
-        if nombre_region is not None:  
-            cursor2.execute(query_existe_region, (nombre_region,))  
-            resultado = cursor2.fetchone()  
-            print(f"Vendedor '{nombre_vendedor}' ya existe. Región '{nombre_region}' existe: {resultado is not None}")  
+def cargar_vendedor():
+    # Consultas origen
+    query_consulta_ventas = """
+        SELECT DISTINCT nombre_vendedor, region_vendedor
+        FROM prueba_sg.ventas
+        WHERE nombre_vendedor IS NOT NULL
+          AND region_vendedor IS NOT NULL
+    """
 
-        if cursor1.fetchone() is None:  
-            if nombre_region is not None and resultado is not None:  
-                data_filtrada.append((nombre_vendedor, resultado[0]))  
-            else:   
-                data_filtrada.append((nombre_vendedor, None))  
+    query_consulta_presupuesto = """
+        SELECT DISTINCT nombre_vendedor
+        FROM prueba_sg.presupuesto
+        WHERE nombre_vendedor IS NOT NULL
+    """
 
-        cursor1.close()   
-        cursor2.close()   
-        
-        if data_filtrada:   
-            data_filtrada = [(i+1, data[0], data[1]) for i, data in enumerate(data_filtrada)]   
-            cargar_datos(query_insert, data_filtrada)   
-        else:   
-            print("No hay vendedores nuevos para insertar")   
+    # Consultas de validación
+    query_existe_vendedor = """
+        SELECT vendedor_id
+        FROM dm_ventas_prueba.dim_vendedor
+        WHERE nombre_vendedor = %s
+    """
+
+    query_existe_region = """
+        SELECT region_id
+        FROM dm_ventas_prueba.dim_region
+        WHERE nombre_region = %s
+    """
+
+    # Insert
+    query_insert = """
+        INSERT INTO dm_ventas_prueba.dim_vendedor (
+            vendedor_id,
+            nombre_vendedor,
+            region
+        ) VALUES (%s, %s, %s)
+    """
+
+    # Obtener datos origen
+    data = traer_datos(query_consulta_ventas) + traer_datos(query_consulta_presupuesto)
+
+    cursor_vendedor = conn.cursor()
+    cursor_region = conn.cursor()
+
+    data_filtrada = []
+
+    for vendedor_data in data:
+        nombre_vendedor = vendedor_data[0]
+        nombre_region = vendedor_data[1] if len(vendedor_data) > 1 else None
+
+        print(f"Procesando vendedor: {nombre_vendedor}, región: {nombre_region}")
+
+        # Verificar si el vendedor ya existe
+        cursor_vendedor.execute(query_existe_vendedor, (nombre_vendedor,))
+        existe_vendedor = cursor_vendedor.fetchone()
+
+        # Buscar región si viene informada
+        region_id = None
+        if nombre_region is not None:
+            cursor_region.execute(query_existe_region, (nombre_region,))
+            region_result = cursor_region.fetchone()
+            region_id = region_result[0] if region_result else None
+
+        # Insertar solo si no existe
+        if existe_vendedor is None:
+            data_filtrada.append((nombre_vendedor, region_id))
+
+    cursor_vendedor.close()
+    cursor_region.close()
+
+    # Insertar nuevos vendedores
+    if data_filtrada:
+        data_final = [
+            (i + 1, row[0], row[1])
+            for i, row in enumerate(data_filtrada)
+        ]
+        cargar_datos(query_insert, data_final)
+    else:
+        print("No hay vendedores nuevos para insertar") 
 
 def cargar_dim_tiempo():   
     print("Datos de ventas cargados para procesar la dimensión tiempo:")   
@@ -173,8 +216,8 @@ if __name__ == "__main__":
     # cargar_dim_region()
     # cargar_dim_ciudad()
     # cargar_dim_cliente()
-    # cargar_vendedor()
-    # cargar_dim_tiempo()
+    #cargar_vendedor()
+    #cargar_dim_tiempo()
 
     # 2. Cargar fact
     cargar_fact_ventas()
